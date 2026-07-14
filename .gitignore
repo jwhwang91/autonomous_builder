@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Autonomous Builder runtime state / logs (regeneratable; not source).
+# The directory itself is kept via runtime_data/.gitkeep.
+runtime_data/logs/
+runtime_data/sessions/
+runtime_data/results/
+runtime_data/handoffs/
+runtime_data/state/
+runtime_data/dashboard/
+runtime_data/failures/
+runtime_data/final_test_deck/

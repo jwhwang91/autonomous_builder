@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autonomous-builder"
+version = "0.1.0"
+description = "External orchestration tool that autonomously drives fresh Claude Code sessions through a long implementation plan, one authoritative packet at a time, verifying repository truth over prose."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Autonomous Builder" }]
+keywords = ["claude", "orchestration", "automation", "pexpect", "deckflip"]
+
+dependencies = [
+    "pexpect>=4.9",
+    "PyYAML>=6.0",
+    "rich>=13.0",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-mock>=3.12",
+]
+
+[project.scripts]
+autonomous-builder = "autonomous_builder.cli:main"
+
+[tool.setuptools]
+packages = [
+    "autonomous_builder",
+    "autonomous_builder.claude",
+    "autonomous_builder.repository",
+    "autonomous_builder.execution",
+    "autonomous_builder.state",
+]
+
+[tool.setuptools.package-data]
+"autonomous_builder" = ["templates/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

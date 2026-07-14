@@ -1,0 +1,70 @@
+# Autonomous Builder — DeckFlip Runtime profile.
+#
+# This drives fresh Claude Code sessions through the DeckFlip Runtime Master Plan,
+# one authoritative packet at a time (currently RT-D per the Execution Ledger),
+# following the plan's EVOLVING packet sequence — never a hardcoded R0..R13.
+
+project:
+  name: DeckFlip Runtime
+  root_dir: /Users/seungchanboi/github_projects/DeckFlip
+  # Auto-detected from the target repo's `git remote get-url origin` (NOT invented).
+  # Set to null to skip origin verification, or change if you push elsewhere.
+  git_repo_url: https://github.com/jwhwang91/DeckFlip.git
+  expected_branch: null          # null = do not enforce a branch
+
+plan:
+  path: /Users/seungchanboi/github_projects/DeckFlip/docs/RUNTIME_MASTER_PLAN.md
+  execution_ledger_path: /Users/seungchanboi/github_projects/DeckFlip/docs/reports/DECKFLIP_2_EXECUTION_LEDGER.md
+  reports_dir: /Users/seungchanboi/github_projects/DeckFlip/docs/reports
+  starting_prompt_path: ./projects/deckflip-runtime/starting_prompt.md
+
+assets:
+  test_asset_dir: /Users/seungchanboi/Desktop/Decks/Artist Deck
+
+claude:
+  executable: /opt/homebrew/bin/claude
+  model: opus
+  effort: ultracode
+  fresh_session_per_packet: true
+  max_retries_per_packet: 2
+  idle_timeout_minutes: 45
+  hard_timeout_minutes: 180
+  permission_mode: default            # normal interactive Claude behaviour
+  dangerously_skip_permissions: false # keep false — the safe default
+  # Model is passed as a CLI flag (--model opus) for reliability; effort is set
+  # via a slash command. Add a graphify bootstrap step below if you want the
+  # graph refreshed for understanding before edits (see graphify.run_at_bootstrap).
+  bootstrap_steps:
+    - send: "/effort ultracode"
+      description: set effort to ultracode
+      settle_seconds: 2.0
+
+graphify:
+  update_after_commit: true
+  command: /graphify . --update
+  run_at_bootstrap: false             # set true to also refresh the graph pre-edit
+  stop_on_failure: true               # STOP_AT_GRAPHIFY_GATE on failure
+  timeout_minutes: 30
+
+execution:
+  require_clean_tree_before_packet: true
+  require_commit_after_packet: true
+  stop_on_failed_tests: true
+  stop_on_blocker: true
+  stop_when_plan_complete: true
+  push: false                         # never push by default
+  # Baseline commands; the authoritative packet may require MORE — Claude runs
+  # every packet-required test in addition to these.
+  test_commands:
+    - npm run typecheck
+    - npm run test
+    - npm run build
+    - npm run build:editor
+
+finalization:
+  create_test_deck: false             # optional final phase; implemented but OFF
+  require_runtime_audit_pass: true
+  do_not_start_dev_server: true
+
+state:
+  data_dir: runtime_data

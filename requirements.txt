@@ -1,0 +1,6 @@
+# Runtime dependencies for Autonomous Builder.
+# For development (tests) install with:  pip install -e ".[dev]"
+pexpect>=4.9
+PyYAML>=6.0
+rich>=13.0
+psutil>=5.9
