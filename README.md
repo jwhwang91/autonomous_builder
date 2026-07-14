@@ -178,6 +178,28 @@ autonomous-builder projects                               # list profiles
 
 `python -m autonomous_builder <cmd>` works identically.
 
+### Unattended / overnight runs
+
+For a truly hands-off run that survives network blips and laptop hiccups:
+
+```bash
+# keep the machine awake + on power (a sleeping Mac suspends the whole run):
+caffeinate -s autonomous-builder run --project deckflip-runtime --auto-resume
+```
+
+`--auto-resume` (available on `run` and `resume`) makes the builder **resilient**:
+on a *transient* stop (retries exhausted / timeout, **clean tree**) it waits for
+API connectivity to return and then auto-resumes; on any *unsafe* stop (dirty
+tree, blocked, failed tests, graphify gate, ambiguity, branch/origin mismatch) it
+**stops for a human** — it never plows ahead over a real problem. It exits on
+plan completion and is bounded by `--max-hours` (default 12) and
+`--max-auto-resumes` (default 50) so it can never loop forever. No work is ever
+lost: completed packets are local commits and state is persisted, so even a hard
+stop just needs `resume`.
+
+The single biggest risk to an overnight run is the **machine sleeping** (which
+also drops the network) — always run under `caffeinate -s` on external power.
+
 ### Reading the dashboard
 
 Live, morning-readable status is written to:
@@ -239,7 +261,7 @@ Parsed copies are ANSI-stripped; the raw session log preserves the stream.
 ## Testing
 
 ```bash
-pytest -q          # 110 tests, no live Claude needed
+pytest -q          # 124 tests, no live Claude needed
 ```
 
 Unit tests never require a live Claude session — they use a scriptable

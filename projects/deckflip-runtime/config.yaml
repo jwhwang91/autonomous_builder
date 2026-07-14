@@ -27,7 +27,7 @@ claude:
   effort: ultracode
   fresh_session_per_packet: true
   max_retries_per_packet: 2
-  idle_timeout_minutes: 45
+  idle_timeout_minutes: 20      # react faster to a dead connection (was 45)
   hard_timeout_minutes: 180
   permission_mode: default            # normal interactive Claude behaviour
   # Unattended overnight runs: bypass Claude's per-action permission prompts so

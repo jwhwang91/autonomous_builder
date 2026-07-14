@@ -140,6 +140,14 @@ against repository truth** (refreshes completed packets from ledger/reports/git,
 trusts the ledger's current next packet over any stale stored value) and
 continues. Stale local state is never blindly trusted.
 
+**Resilient auto-resume** (`run/resume --auto-resume`, `supervisor.py`): for
+unattended overnight runs, a connectivity-aware supervisor wraps the runner. On a
+*transient* stop (retries exhausted / timeout with a clean tree — the shape a
+network outage takes) it waits for the Anthropic API to become reachable again,
+then auto-resumes; on any *unsafe* stop it halts for a human. Bounded by
+`--max-hours` and `--max-auto-resumes`. Pair with `caffeinate -s` (a sleeping Mac
+suspends the run and drops the network — the single biggest overnight risk).
+
 ## 11. Dashboard
 
 `runtime_data/dashboard/dashboard.{md,json}`, rewritten after every transition,
@@ -177,7 +185,7 @@ confirmed **12 real defects**, all now fixed with regression tests:
 
 ## 12. Tests
 
-**110 tests, all passing, ~4s, no live Claude required.** Coverage matches the
+**124 tests, all passing, ~4s, no live Claude required.** Coverage matches the
 spec's matrix: config (valid/missing/bad-path/invalid-timeout), ledger (standard/
 split/repair/superseded/no-next/ambiguous/unicode), parser (valid/extra-prose/
 missing-field/malformed-status/unicode/last-block-wins/ANSI), discovery (ledger>

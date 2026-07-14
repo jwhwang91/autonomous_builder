@@ -164,18 +164,42 @@ def cmd_run(args) -> int:
         return 1
     runner = Runner(profile, max_packets=args.max_packets)
     _print(f"[green]starting run[/] for {profile.project.name} "
-           f"(max_packets={args.max_packets or '∞'})")
-    state = runner.run(resume=False)
-    return _report_final(state)
+           f"(max_packets={args.max_packets or '∞'}"
+           f"{', auto-resume' if getattr(args, 'auto_resume', False) else ''})")
+    return _run_or_supervise(runner, args, start_resume=False)
 
 
 def cmd_resume(args) -> int:
     from autonomous_builder.runner import Runner
     profile = _load(args)
     runner = Runner(profile, max_packets=args.max_packets)
-    _print(f"[green]resuming run[/] for {profile.project.name}")
-    state = runner.run(resume=True)
-    return _report_final(state)
+    _print(f"[green]resuming run[/] for {profile.project.name}"
+           f"{' (auto-resume)' if getattr(args, 'auto_resume', False) else ''}")
+    return _run_or_supervise(runner, args, start_resume=True)
+
+
+def _run_or_supervise(runner, args, *, start_resume: bool) -> int:
+    if not getattr(args, "auto_resume", False):
+        state = runner.run(resume=start_resume)
+        return _report_final(state)
+    from autonomous_builder.supervisor import Supervisor
+
+    def _log(msg: str) -> None:
+        _print(f"[dim]supervisor:[/] {msg}")
+        runner.store.log(f"supervisor: {msg}")
+
+    sup = Supervisor(
+        runner, start_resume=start_resume,
+        max_hours=args.max_hours, max_auto_resumes=args.max_auto_resumes,
+        logger=_log,
+    )
+    result = sup.run()
+    _print(f"\n[bold]supervisor finished:[/] {result.reason} "
+           f"(auto-resumes: {result.auto_resumes})"
+           + (f" — {result.detail}" if result.detail else ""))
+    if result.reason == "unsafe_stop":
+        _print("[yellow]stopped for a human — see runtime_data/failures/ and `resume` after fixing.[/]")
+    return _report_final(result.state)
 
 
 def cmd_status(args) -> int:
@@ -297,14 +321,25 @@ def build_parser() -> argparse.ArgumentParser:
     add_project(p_doc)
     p_doc.set_defaults(func=cmd_doctor)
 
+    def add_auto_resume(sp):
+        sp.add_argument("--auto-resume", action="store_true",
+                        help="resilient mode: on a transient/network stop with a clean tree, "
+                             "wait for connectivity and auto-resume; stop for a human on unsafe stops")
+        sp.add_argument("--max-hours", type=float, default=12.0,
+                        help="max total wall-clock for a supervised run (default: 12)")
+        sp.add_argument("--max-auto-resumes", type=int, default=50,
+                        help="max number of automatic resumes before pausing (default: 50)")
+
     p_run = sub.add_parser("run", help="start an autonomous run")
     add_project(p_run)
     p_run.add_argument("--max-packets", type=int, default=None, help="stop after N packets (default: run to completion)")
+    add_auto_resume(p_run)
     p_run.set_defaults(func=cmd_run)
 
     p_res = sub.add_parser("resume", help="resume from persisted state + repository truth")
     add_project(p_res)
     p_res.add_argument("--max-packets", type=int, default=None)
+    add_auto_resume(p_res)
     p_res.set_defaults(func=cmd_resume)
 
     p_st = sub.add_parser("status", help="show the current run status")
