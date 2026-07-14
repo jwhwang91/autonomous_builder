@@ -110,8 +110,10 @@ class Runner:
         clock: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
         max_packets: Optional[int] = None,
+        progress: Optional[Callable[[str], None]] = None,
     ):
         self.profile = profile
+        self.progress = progress or (lambda m: None)  # live console progress
         self.store = store or StateStore(profile)
         root = str(profile.resolve(profile.project.root_dir) or profile.project.root_dir)
         self.git = git_monitor or GitMonitor(root)
@@ -129,6 +131,22 @@ class Runner:
         self._sleep = sleep
         self.max_packets = max_packets
         self._extras = DashboardExtras()
+
+    # -- live progress (console + builder.log) ------------------------------
+    def _say(self, msg: str) -> None:
+        self.store.log(msg)
+        self.progress(msg)
+
+    def _session_logger(self, msg: str) -> None:
+        self.store.log(f"session: {msg}")
+        self.progress(f"   · {msg}")
+
+    def _heartbeat(self, label: str, elapsed: float, idle_for: float, nbytes: int) -> None:
+        m, s = divmod(int(elapsed), 60)
+        self.progress(
+            f"   ⏳ {label}: {m}m{s:02d}s elapsed · last Claude output "
+            f"{int(idle_for)}s ago · {nbytes / 1024:.1f} KB captured"
+        )
 
     # ======================================================================
     # entry points
@@ -192,7 +210,7 @@ class Runner:
                 packet = discovery.next_packet
                 state.next_packet = packet
                 is_first = not state.first_session_done
-                self.store.log(f"authoritative packet: {packet} (source {discovery.authority_source})")
+                self._say(f"authoritative packet: {packet} (source {discovery.authority_source})")
 
                 step = self._execute_packet(state, packet, discovery, git_state, is_first)
                 packets_done += 1
@@ -280,11 +298,13 @@ class Runner:
             state.attempt = attempt
             state.status = RunStatus.RUNNING.value
             self._save(state)
-            self.store.log(f"--- packet {packet} attempt {attempt} ---")
+            self._say(f"--- packet {packet} attempt {attempt} — launching a fresh Claude session ---")
 
             log_path = self.store.session_log_path(packet, attempt)
             state.last_session_log = str(log_path)
             session = self.session_factory(str(log_path))
+            session.logger = self._session_logger      # stream steps to the console
+            session.heartbeat = self._heartbeat         # live "still working" ticks
 
             # The session (a live Claude process) is ALWAYS closed on the way out
             # of this attempt — including on any exception path — so a finished
@@ -293,6 +313,7 @@ class Runner:
                 monitor_reason, result, git_after, bootstrap_ok = self._run_session(
                     session, state, packet, discovery, git_before, is_first, attempt
                 )
+                self.progress(f"   · session ended ({monitor_reason}); verifying against repository truth…")
 
                 self.store.write_result_json(packet, attempt, result)
                 history = PacketHistoryEntry(
@@ -346,7 +367,7 @@ class Runner:
                     self._commit_success_to_state(state, packet, git_after, handoff)
                     history.commit = git_after.head
                     state.packet_history.append(history)
-                    self.store.log(f"packet {packet} COMPLETE — commit {git_after.short_head}")
+                    self._say(f"✅ packet {packet} COMPLETE — commit {git_after.short_head}")
                     return StepResult(success=True, handoff=handoff)
 
                 # --- failure: decide retry vs stop -------------------------
@@ -458,7 +479,7 @@ class Runner:
             hard_timeout_seconds=self.profile.graphify.timeout_minutes * 60,
             clock=self._clock,
         )
-        self.store.log(f"graphify gate for {packet} @ {git_after.short_head}")
+        self._say(f"running graphify gate for {packet} @ {git_after.short_head} …")
         monitor = session.run_graphify(
             self.graphify.command,
             self.profile.graphify.success_patterns,
@@ -655,6 +676,7 @@ class Runner:
         self._save(state)
         self._refresh_dashboard(state, git_state)
         self.store.log(f"STOP: {reason.value} — {detail}", logging.WARNING)
+        self.progress(f"🛑 STOP: {reason.value} — {detail}")
 
     def _write_ambiguity_report(self, discovery, git_state) -> None:
         content = (

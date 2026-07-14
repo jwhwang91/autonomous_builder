@@ -83,6 +83,9 @@ class ClaudeSession:
         self._ready_res = [re.compile(p) for p in config.ready_patterns]
         self._interactive = [(re.compile(p, re.IGNORECASE), r) for p, r in config.interactive_responses.items()]
         self._responded: set[str] = set()
+        # optional live-progress heartbeat: heartbeat(label, elapsed, idle_for, nbytes)
+        self.heartbeat: Optional[Callable[[str, float, float, int], None]] = None
+        self.heartbeat_seconds: float = 15.0
 
     # -- lifecycle ----------------------------------------------------------
     def open(self, startup_timeout: float = 90.0) -> bool:
@@ -199,7 +202,17 @@ class ClaudeSession:
         # keep enough overlap that a pattern can never straddle the truncation
         # boundary, even when a single read returns a full 64k buffer.
         keep = 16000
+        last_hb = self._clock()
         while True:
+            # live heartbeat so a long monitor is visibly alive, not "frozen"
+            if self.heartbeat is not None:
+                now = self._clock()
+                if (now - last_hb) >= self.heartbeat_seconds:
+                    last_hb = now
+                    try:
+                        self.heartbeat(label, wd.elapsed, wd.idle_for, len(collected))
+                    except Exception:  # pragma: no cover - never let display break the run
+                        pass
             chunk = self.driver.read_available(self.config.poll_interval_seconds)
             if chunk:
                 stripped = self._absorb(chunk)

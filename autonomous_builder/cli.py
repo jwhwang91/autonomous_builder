@@ -35,6 +35,14 @@ def _print(msg: str = "") -> None:
         print(msg)
 
 
+def _progress(msg: str) -> None:
+    """Live progress line to the terminal (markup-safe, dimmed)."""
+    if _console:
+        _console.print(msg, markup=False, highlight=False, style="dim")
+    else:  # pragma: no cover
+        print(msg)
+
+
 def _default_projects_dir() -> Path:
     # search cwd upward for a projects/ dir, else fall back to package-relative
     here = Path.cwd()
@@ -162,7 +170,7 @@ def cmd_run(args) -> int:
         for e in report.errors:
             _print(f"  [red]error:[/] {e}")
         return 1
-    runner = Runner(profile, max_packets=args.max_packets)
+    runner = Runner(profile, max_packets=args.max_packets, progress=_progress)
     _print(f"[green]starting run[/] for {profile.project.name} "
            f"(max_packets={args.max_packets or '∞'}"
            f"{', auto-resume' if getattr(args, 'auto_resume', False) else ''})")
@@ -172,7 +180,7 @@ def cmd_run(args) -> int:
 def cmd_resume(args) -> int:
     from autonomous_builder.runner import Runner
     profile = _load(args)
-    runner = Runner(profile, max_packets=args.max_packets)
+    runner = Runner(profile, max_packets=args.max_packets, progress=_progress)
     _print(f"[green]resuming run[/] for {profile.project.name}"
            f"{' (auto-resume)' if getattr(args, 'auto_resume', False) else ''}")
     return _run_or_supervise(runner, args, start_resume=True)
