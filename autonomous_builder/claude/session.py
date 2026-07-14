@@ -23,8 +23,9 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from autonomous_builder.claude.driver import ClaudeDriver
-from autonomous_builder.claude.parser import END_SENTINEL, strip_ansi
+from autonomous_builder.claude.parser import END_SENTINEL, ResultParser, strip_ansi
 from autonomous_builder.config import BootstrapStep, ClaudeConfig
+from autonomous_builder.models import is_packet_id
 from autonomous_builder.execution.watchdog import Watchdog, WatchdogVerdict
 
 # bracketed-paste wrappers let us insert a multi-line prompt without each newline
@@ -86,6 +87,7 @@ class ClaudeSession:
         # optional live-progress heartbeat: heartbeat(label, elapsed, idle_for, nbytes)
         self.heartbeat: Optional[Callable[[str, float, float, int], None]] = None
         self.heartbeat_seconds: float = 15.0
+        self._parser = ResultParser()  # to content-validate result blocks
 
     # -- lifecycle ----------------------------------------------------------
     def open(self, startup_timeout: float = 90.0) -> bool:
@@ -149,19 +151,16 @@ class ClaudeSession:
     def send_packet_prompt(self, prompt: str, watchdog: Watchdog) -> MonitorResult:
         self.logger("delivering packet prompt")
         self._deliver_prompt(prompt)
-        # The prompt template contains the result-block sentinels; once submitted,
-        # Claude Code echoes the pasted prompt back into the transcript. Drain and
-        # discard that echo (it goes to the transcript for the parser, but not into
-        # the monitor's match window), then guard the sentinel for a warm-up
-        # window — so we complete on CLAUDE's result block, never on the echo.
-        settle = getattr(self.config, "echo_settle_seconds", 8.0)
-        guard = getattr(self.config, "min_packet_result_seconds", 15.0)
-        self.logger("prompt submitted; draining prompt echo")
-        self._drain(settle)
+        self.logger("prompt submitted; waiting for Claude's result block")
+        # Completion is gated on a VALID result block (see _monitor): Claude Code
+        # echoes the pasted prompt, and the prompt template contains the sentinels,
+        # but that echoed block is the invalid template (STATUS: COMPLETE|BLOCKED|
+        # FAILED, PACKET: <placeholder>) and is ignored — we wait for Claude's real,
+        # parseable block.
         return self._monitor(
             until_patterns=[re.escape(END_SENTINEL)],
             watchdog=watchdog,
-            min_match_seconds=guard,
+            require_valid_result=True,
             label="packet",
         )
 
@@ -198,7 +197,7 @@ class ClaudeSession:
         watchdog: Optional[Watchdog] = None,
         idle_seconds: Optional[float] = None,
         hard_seconds: Optional[float] = None,
-        min_match_seconds: float = 0.0,
+        require_valid_result: bool = False,
         label: str = "",
     ) -> MonitorResult:
         wd = watchdog or Watchdog(
@@ -213,7 +212,6 @@ class ClaudeSession:
         # keep enough overlap that a pattern can never straddle the truncation
         # boundary, even when a single read returns a full 64k buffer.
         keep = 16000
-        monitor_start = self._clock()
         last_hb = self._clock()
         while True:
             # live heartbeat so a long monitor is visibly alive, not "frozen"
@@ -241,13 +239,23 @@ class ClaudeSession:
                 for fp in failure:
                     if fp.search(search_space):
                         return MonitorResult("failure", collected, fp.pattern)
-                if (self._clock() - monitor_start) >= min_match_seconds:
-                    for up in until:
-                        if up.search(search_space):
-                            reason = "sentinel" if up.pattern == re.escape(END_SENTINEL) else "matched"
-                            # drain a little trailing output for completeness
-                            collected += self._drain(0.5)
-                            return MonitorResult(reason, collected, up.pattern)
+                for up in until:
+                    if not up.search(search_space):
+                        continue
+                    if up.pattern == re.escape(END_SENTINEL):
+                        # Only complete on a VALID result block. Claude Code echoes
+                        # the pasted prompt, whose template contains the sentinels,
+                        # but that echoed block is invalid (template STATUS/PACKET
+                        # placeholders) — ignore it and keep waiting for Claude's
+                        # real, parseable block.
+                        if require_valid_result and not self._is_real_result(search_space):
+                            continue
+                        reason = "sentinel"
+                    else:
+                        reason = "matched"
+                    # drain a little trailing output for completeness
+                    collected += self._drain(0.5)
+                    return MonitorResult(reason, collected, up.pattern)
             if not self.driver.is_alive():
                 collected += self._drain(0.3)
                 return MonitorResult("eof", collected)
@@ -258,6 +266,16 @@ class ClaudeSession:
             if verdict == WatchdogVerdict.HARD_TIMEOUT:
                 self.logger(f"[{label}] hard timeout after {wd.elapsed:.0f}s")
                 return MonitorResult("hard_timeout", collected)
+
+    def _is_real_result(self, text: str) -> bool:
+        """True only for a genuine result block — not the echoed prompt template.
+
+        The echoed template has ``STATUS: COMPLETE|BLOCKED|FAILED`` (invalid) and
+        ``PACKET: <placeholder>`` (not a real id); Claude's real block parses
+        cleanly with a real packet id.
+        """
+        r = self._parser.parse(text)
+        return r.is_valid and bool(r.packet) and is_packet_id(r.packet)
 
     # -- helpers ------------------------------------------------------------
     def _submit(self) -> None:
