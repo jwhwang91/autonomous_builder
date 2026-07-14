@@ -148,19 +148,21 @@ class ClaudeSession:
         return report
 
     # -- packet execution ---------------------------------------------------
-    def send_packet_prompt(self, prompt: str, watchdog: Watchdog) -> MonitorResult:
+    def send_packet_prompt(self, prompt: str, watchdog: Watchdog,
+                           result_file: Optional[str] = None) -> MonitorResult:
         self.logger("delivering packet prompt")
         self._deliver_prompt(prompt)
         self.logger("prompt submitted; waiting for Claude's result block")
-        # Completion is gated on a VALID result block (see _monitor): Claude Code
-        # echoes the pasted prompt, and the prompt template contains the sentinels,
-        # but that echoed block is the invalid template (STATUS: COMPLETE|BLOCKED|
-        # FAILED, PACKET: <placeholder>) and is ignored — we wait for Claude's real,
-        # parseable block.
+        # Primary completion signal: Claude writes the result block to *result_file*,
+        # which the builder polls + parses directly (clean — no TUI garble, no idle
+        # wait). The TUI sentinel is a content-validated FALLBACK: Claude Code echoes
+        # the pasted prompt whose template contains the sentinels, but that echoed
+        # block is the invalid template and is ignored.
         return self._monitor(
             until_patterns=[re.escape(END_SENTINEL)],
             watchdog=watchdog,
             require_valid_result=True,
+            result_file=result_file,
             label="packet",
         )
 
@@ -198,6 +200,7 @@ class ClaudeSession:
         idle_seconds: Optional[float] = None,
         hard_seconds: Optional[float] = None,
         require_valid_result: bool = False,
+        result_file: Optional[str] = None,
         label: str = "",
     ) -> MonitorResult:
         wd = watchdog or Watchdog(
@@ -214,6 +217,12 @@ class ClaudeSession:
         keep = 16000
         last_hb = self._clock()
         while True:
+            # PRIMARY completion: Claude wrote the result block to result_file.
+            # Polled every iteration (≈ poll interval) so completion is prompt —
+            # no idle-timeout wait, no TUI-garbled parsing.
+            if result_file and self._result_file_ready(result_file):
+                collected += self._drain(0.3)
+                return MonitorResult("result_file", collected)
             # live heartbeat so a long monitor is visibly alive, not "frozen"
             if self.heartbeat is not None:
                 now = self._clock()
@@ -266,6 +275,16 @@ class ClaudeSession:
             if verdict == WatchdogVerdict.HARD_TIMEOUT:
                 self.logger(f"[{label}] hard timeout after {wd.elapsed:.0f}s")
                 return MonitorResult("hard_timeout", collected)
+
+    def _result_file_ready(self, path: str) -> bool:
+        """True once *path* exists and holds a complete, valid result block."""
+        try:
+            content = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        if END_SENTINEL not in content:  # still being written / incomplete
+            return False
+        return self._is_real_result(content)
 
     def _is_real_result(self, text: str) -> bool:
         """True only for a genuine result block — not the echoed prompt template.

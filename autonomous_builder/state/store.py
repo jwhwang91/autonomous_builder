@@ -128,6 +128,10 @@ class StateStore:
     def session_log_path(self, packet: str, attempt: int) -> Path:
         return self.sessions_dir / f"{_ts()}_{_safe(packet)}_attempt-{attempt}.log"
 
+    def result_block_path(self, packet: str, attempt: int) -> Path:
+        """Absolute path Claude writes its result block to (builder polls + reads)."""
+        return self.results_dir / f"{_safe(packet)}_attempt-{attempt}.block"
+
     def write_result_json(self, packet: str, attempt: int, result) -> Path:
         path = self.results_dir / f"{_ts()}_{_safe(packet)}_attempt-{attempt}.json"
         path.write_text(json.dumps(to_jsonable(result), indent=2, ensure_ascii=False), encoding="utf-8")

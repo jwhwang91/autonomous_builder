@@ -66,10 +66,19 @@ Set GRAPHIFY_UPDATE_REQUIRED: YES in your result block if a commit was made.
 {{SAFETY_RULES}}
 {{PUSH_POLICY}}
 
-=== REQUIRED RESULT BLOCK ===
-Emit this block verbatim (fill in real values) as the LAST thing you output.
-The orchestrator parses it and verifies every field against repository truth.
+=== HOW TO SIGNAL COMPLETION (IMPORTANT) ===
+When the packet is fully done (committed, tests pass, report + ledger updated),
+WRITE the result block below to this exact absolute file path — this is the
+PRIMARY way the orchestrator detects completion. Do NOT rely on printing alone;
+terminal output can be garbled.
 
+  {{RESULT_FILE}}
+
+Write it exactly ONCE, only when finished, containing the block verbatim with
+real values. You may also print it. The orchestrator reads this file and verifies
+every field against repository truth.
+
+=== REQUIRED RESULT BLOCK ===
 AUTONOMOUS_BUILDER_RESULT
 STATUS: COMPLETE|BLOCKED|FAILED
 PACKET: <the packet id you executed>

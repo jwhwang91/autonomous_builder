@@ -111,9 +111,11 @@ class Runner:
         sleep: Callable[[float], None] = time.sleep,
         max_packets: Optional[int] = None,
         progress: Optional[Callable[[str], None]] = None,
+        notify: Optional[Callable[[str, str], None]] = None,
     ):
         self.profile = profile
         self.progress = progress or (lambda m: None)  # live console progress
+        self.notify = notify or (lambda title, msg: None)  # native desktop notification
         self.store = store or StateStore(profile)
         root = str(profile.resolve(profile.project.root_dir) or profile.project.root_dir)
         self.git = git_monitor or GitMonitor(root)
@@ -306,12 +308,20 @@ class Runner:
             session.logger = self._session_logger      # stream steps to the console
             session.heartbeat = self._heartbeat         # live "still working" ticks
 
+            # Claude writes its result block here; the builder polls + reads it
+            # directly (clean, prompt completion). Clear any stale file first.
+            result_file = self.store.result_block_path(packet, attempt)
+            try:
+                result_file.unlink()
+            except FileNotFoundError:
+                pass
+
             # The session (a live Claude process) is ALWAYS closed on the way out
             # of this attempt — including on any exception path — so a finished
             # session never lingers in the background.
             try:
                 monitor_reason, result, git_after, bootstrap_ok = self._run_session(
-                    session, state, packet, discovery, git_before, is_first, attempt
+                    session, state, packet, discovery, git_before, is_first, attempt, result_file
                 )
                 self.progress(f"   · session ended ({monitor_reason}); verifying against repository truth…")
 
@@ -368,6 +378,8 @@ class Runner:
                     history.commit = git_after.head
                     state.packet_history.append(history)
                     self._say(f"✅ packet {packet} COMPLETE — commit {git_after.short_head}")
+                    self.notify(f"✅ {packet} COMPLETE",
+                                f"commit {git_after.short_head} · next {handoff.next_authoritative_packet or '—'}")
                     return StepResult(success=True, handoff=handoff)
 
                 # --- failure: decide retry vs stop -------------------------
@@ -412,7 +424,7 @@ class Runner:
         return self.retry.decide(ctx)
 
     def _run_session(self, session: ClaudeSession, state, packet, discovery,
-                     git_before, is_first, attempt):
+                     git_before, is_first, attempt, result_file=None):
         """Open, bootstrap and run one Claude session; return (reason, result, git_after, bootstrap_ok)."""
         try:
             ready = session.open()
@@ -427,7 +439,7 @@ class Runner:
             self.store.log("bootstrap failed (a required step was not confirmed)", logging.WARNING)
             return ("bootstrap_failed", ClaudeResult(), self.git.snapshot(), False)
 
-        prompt = self._build_prompt(packet, discovery, git_before, is_first, attempt)
+        prompt = self._build_prompt(packet, discovery, git_before, is_first, attempt, result_file)
         watchdog = Watchdog(
             idle_timeout_seconds=self.profile.claude.idle_timeout_minutes * 60,
             hard_timeout_seconds=self.profile.claude.hard_timeout_minutes * 60,
@@ -435,18 +447,35 @@ class Runner:
         )
         state.claude_pid = session.driver.pid
         self._save(state)
-        monitor = session.send_packet_prompt(prompt, watchdog)
-        result = self.parser.parse(session.transcript)
+        monitor = session.send_packet_prompt(
+            prompt, watchdog, result_file=str(result_file) if result_file else None
+        )
+        result = self._parse_result(result_file, session.transcript)
         git_after = self.git.snapshot()
         return (monitor.reason, result, git_after, True)
 
-    def _build_prompt(self, packet, discovery, git_before, is_first, attempt) -> str:
+    def _parse_result(self, result_file, transcript: str) -> ClaudeResult:
+        """Prefer the result FILE Claude wrote (clean) over the garbled TUI transcript."""
+        if result_file is not None:
+            try:
+                p = Path(result_file)
+                if p.exists():
+                    r = self.parser.parse(p.read_text(encoding="utf-8", errors="replace"))
+                    if r.is_valid:
+                        return r
+            except OSError:  # pragma: no cover - defensive
+                pass
+        return self.parser.parse(transcript)
+
+    def _build_prompt(self, packet, discovery, git_before, is_first, attempt, result_file=None) -> str:
         handoff = self.store.latest_handoff() if not is_first else None
+        rf = str(result_file) if result_file else None
         if attempt > 1:
             return self.prompts.build_repair_prompt(
                 profile=self.profile, git_state=git_before, handoff=handoff,
                 repair_reason=(f"A previous attempt on {packet} did not cleanly verify "
                                "against repository truth. Verify current state carefully."),
+                result_file=rf,
             )
         starting_prompt = None
         if is_first and self.profile.plan.starting_prompt_path:
@@ -458,7 +487,7 @@ class Runner:
             profile=self.profile, git_state=git_before, discovery=discovery,
             handoff=handoff, starting_prompt=starting_prompt,
             recent_report_paths=reports.latest_paths(self.profile.execution.max_reports_in_prompt),
-            is_first_session=is_first,
+            is_first_session=is_first, result_file=rf,
         )
 
     # ======================================================================
@@ -677,6 +706,10 @@ class Runner:
         self._refresh_dashboard(state, git_state)
         self.store.log(f"STOP: {reason.value} — {detail}", logging.WARNING)
         self.progress(f"🛑 STOP: {reason.value} — {detail}")
+        if reason == StopReason.PLAN_COMPLETE:
+            self.notify("🎉 Plan complete", detail[:120])
+        else:
+            self.notify(f"🛑 Run stopped: {reason.value}", detail[:120])
 
     def _write_ambiguity_report(self, discovery, git_state) -> None:
         content = (

@@ -38,6 +38,13 @@ Current git HEAD:   {{CURRENT_HEAD}}
 {{SAFETY_RULES}}
 {{PUSH_POLICY}}
 
+=== HOW TO SIGNAL COMPLETION (IMPORTANT) ===
+When done, WRITE the result block below to this exact absolute file path — the
+PRIMARY completion signal (terminal output can be garbled). Write it once, only
+when finished:
+
+  {{RESULT_FILE}}
+
 === REQUIRED RESULT BLOCK ===
 AUTONOMOUS_BUILDER_RESULT
 STATUS: COMPLETE|BLOCKED|FAILED

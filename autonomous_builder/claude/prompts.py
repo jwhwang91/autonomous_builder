@@ -103,6 +103,7 @@ class PromptBuilder:
         starting_prompt: Optional[str],
         recent_report_paths: list[str],
         is_first_session: bool,
+        result_file: Optional[str] = None,
     ) -> str:
         template = self._load("packet_prompt.md")
         disagreements = ""
@@ -132,6 +133,7 @@ class PromptBuilder:
             "GRAPHIFY_COMMAND": profile.graphify.command,
             "SAFETY_RULES": self.safety_rules(profile),
             "PUSH_POLICY": self.push_policy(profile),
+            "RESULT_FILE": result_file or "",
         }
         return render(template, context)
 
@@ -142,6 +144,7 @@ class PromptBuilder:
         git_state: GitState,
         handoff: Optional[Handoff],
         repair_reason: str,
+        result_file: Optional[str] = None,
     ) -> str:
         template = self._load("repair_prompt.md")
         context = {
@@ -157,6 +160,7 @@ class PromptBuilder:
             "TEST_COMMANDS": _bullets(profile.execution.test_commands),
             "SAFETY_RULES": self.safety_rules(profile),
             "PUSH_POLICY": self.push_policy(profile),
+            "RESULT_FILE": result_file or "",
         }
         return render(template, context)
 

@@ -119,6 +119,31 @@ def test_real_result_block_completes_after_echo(adv_clock):
     assert mr.reason == "sentinel"
 
 
+def test_completes_via_result_file(adv_clock, tmp_path):
+    # Claude wrote the result block to a FILE — the builder completes on that,
+    # even though the TUI stream never carries a valid block.
+    rf = tmp_path / "RT-G.block"
+    rf.write_text(result_block("RT-G", "abc1234def0", "RT-H"), encoding="utf-8")
+    d = FakeClaudeDriver(initial_output="…implementing…", eof_after_empty_reads=1000)
+    s = ClaudeSession(d, _cfg(), clock=adv_clock, sleep=lambda x: None)
+    wd = Watchdog(600, 3600, clock=adv_clock)
+    mr = s._monitor([re.escape(END_SENTINEL)], watchdog=wd, require_valid_result=True,
+                    result_file=str(rf), label="packet")
+    assert mr.reason == "result_file"
+
+
+def test_partial_result_file_ignored(adv_clock, tmp_path):
+    # a half-written result file (no END sentinel) must NOT complete
+    rf = tmp_path / "x.block"
+    rf.write_text("AUTONOMOUS_BUILDER_RESULT\nSTATUS: COMPLETE\nPACKET: RT-G\n", encoding="utf-8")
+    d = FakeClaudeDriver(initial_output="…", eof_after_empty_reads=3)
+    s = ClaudeSession(d, _cfg(), clock=adv_clock, sleep=lambda x: None)
+    wd = Watchdog(600, 3600, clock=adv_clock)
+    mr = s._monitor([re.escape(END_SENTINEL)], watchdog=wd, require_valid_result=True,
+                    result_file=str(rf), label="packet")
+    assert mr.reason == "eof"  # incomplete file ignored
+
+
 def test_terminate_closes(adv_clock):
     d = FakeClaudeDriver(initial_output="> ")
     s = _session(d, adv_clock)
