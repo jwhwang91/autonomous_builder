@@ -10,7 +10,7 @@ project:
   # Auto-detected from the target repo's `git remote get-url origin` (NOT invented).
   # Set to null to skip origin verification, or change if you push elsewhere.
   git_repo_url: https://github.com/jwhwang91/DeckFlip.git
-  expected_branch: null          # null = do not enforce a branch
+  expected_branch: main          # verified before every packet; stop on mismatch
 
 plan:
   path: /Users/seungchanboi/github_projects/DeckFlip/docs/RUNTIME_MASTER_PLAN.md
@@ -30,13 +30,19 @@ claude:
   idle_timeout_minutes: 45
   hard_timeout_minutes: 180
   permission_mode: default            # normal interactive Claude behaviour
-  dangerously_skip_permissions: false # keep false — the safe default
+  # Unattended overnight runs: bypass Claude's per-action permission prompts so
+  # the session doesn't stall waiting for approval. Trusted because it's your own
+  # repo + plan, the builder verifies repository truth after every packet, stops
+  # on any problem, and never pushes. Set back to false to require live approval.
+  dangerously_skip_permissions: true
   # Model is passed as a CLI flag (--model opus) for reliability; effort is set
   # via a slash command. Add a graphify bootstrap step below if you want the
   # graph refreshed for understanding before edits (see graphify.run_at_bootstrap).
   bootstrap_steps:
     - send: "/effort ultracode"
       description: set effort to ultracode
+      expect: "ultracode"      # confirm it engaged (logged in the session log)
+      required: false          # log-only for now; bump to true once verified
       settle_seconds: 2.0
 
 graphify:
