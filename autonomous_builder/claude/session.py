@@ -234,21 +234,29 @@ class ClaudeSession:
                 return MonitorResult("hard_timeout", collected)
 
     # -- helpers ------------------------------------------------------------
+    def _submit(self) -> None:
+        """Press Enter in the Claude Code TUI.
+
+        Enter is a CARRIAGE RETURN (\\r) in the raw-mode TUI — pexpect.sendline's
+        line feed (\\n) only inserts a newline in the input box and does NOT
+        submit, which left the pasted prompt sitting un-sent.
+        """
+        self.driver.send_text("\r")
+
     def _deliver_prompt(self, prompt: str) -> None:
         if self.prompt_delivery == "paste":
             self.driver.send_text(_PASTE_START + prompt + _PASTE_END)
-            self._sleep(0.4)
-            self.driver.send_line("")  # submit
-        else:  # lines mode: send as raw text then a submitting Enter
+            self._sleep(1.0)  # let a large multi-line paste fully settle
+        else:  # lines mode: send as raw text
             self.driver.send_text(prompt)
-            self._sleep(0.4)
-            self.driver.send_line("")
+            self._sleep(0.6)
+        self._submit()
 
     def _deliver_line(self, text: str, press_enter: bool) -> None:
+        self.driver.send_text(text)
         if press_enter:
-            self.driver.send_line(text)
-        else:
-            self.driver.send_text(text)
+            self._sleep(0.3)
+            self._submit()
 
     def _maybe_respond(self, window: str) -> None:
         for pattern, response in self._interactive:
@@ -264,11 +272,12 @@ class ClaudeSession:
             self._responded.add(key)
             self.logger(f"interactive prompt matched {pattern.pattern!r}; sending {response!r}")
             if response in ("\r", "\n", "enter", "ENTER"):
-                self.driver.send_line("")
+                self._submit()
             elif len(response) == 1:
                 self.driver.send_text(response)
             else:
-                self.driver.send_line(response)
+                self.driver.send_text(response)
+                self._submit()
 
     def _drain(self, seconds: float, max_empty: int = 3) -> str:
         """Read whatever is immediately available for up to *seconds*.

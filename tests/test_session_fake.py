@@ -36,7 +36,9 @@ def test_bootstrap_sends_steps(adv_clock):
     s.open(startup_timeout=5)
     report = s.bootstrap([BootstrapStep(send="/effort ultracode", settle_seconds=0.0)])
     assert report.ok
-    assert "/effort ultracode" in d.sent_lines
+    # command text is typed via send_text, then submitted with a carriage return
+    assert "/effort ultracode" in d.sent_texts
+    assert "\r" in d.sent_texts
 
 
 def test_packet_monitor_reaches_sentinel(adv_clock):
