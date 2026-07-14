@@ -76,6 +76,12 @@ class ClaudeConfig:
     ])
     completion_sentinel: str = "END_AUTONOMOUS_BUILDER_RESULT"
     result_start_sentinel: str = "AUTONOMOUS_BUILDER_RESULT"
+    # Claude Code renders the pasted prompt back into the transcript, and the
+    # prompt template contains the result sentinels — so after submitting we drain
+    # + discard that echo, and ignore any sentinel match for a warm-up window, to
+    # complete on CLAUDE's result block rather than the echoed template.
+    echo_settle_seconds: float = 8.0
+    min_packet_result_seconds: float = 15.0
     # Known interactive prompts -> the key/line to send. Empty by default:
     # the builder uses normal interactive behaviour and does not auto-approve.
     interactive_responses: dict[str, str] = field(default_factory=dict)

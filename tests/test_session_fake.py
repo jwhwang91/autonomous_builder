@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import re
+
 from autonomous_builder.claude.driver import FakeClaudeDriver
+from autonomous_builder.claude.parser import END_SENTINEL
 from autonomous_builder.claude.session import ClaudeSession
 from autonomous_builder.config import BootstrapStep, ClaudeConfig
 from autonomous_builder.execution.watchdog import Watchdog
@@ -9,7 +12,8 @@ from tests.conftest import GRAPHIFY_SUCCESS, result_block
 
 
 def _cfg():
-    return ClaudeConfig(poll_interval_seconds=0.001, ready_patterns=[r">\s*$", "READY"])
+    return ClaudeConfig(poll_interval_seconds=0.001, ready_patterns=[r">\s*$", "READY"],
+                        echo_settle_seconds=0.0, min_packet_result_seconds=0.0)
 
 
 def _session(driver, adv_clock):
@@ -79,6 +83,37 @@ def test_idle_timeout(adv_clock):
     wd = Watchdog(idle_timeout_seconds=0.05, hard_timeout_seconds=100, clock=adv_clock)
     mr = s.send_packet_prompt("do work", wd)
     assert mr.reason == "idle_timeout"
+
+
+def test_guard_prevents_immediate_echo_match(adv_clock):
+    # regression: the prompt template contains END_AUTONOMOUS_BUILDER_RESULT, and
+    # Claude Code echoes the pasted prompt back. A sentinel present immediately
+    # (the echo) must NOT end the monitor instantly — the warm-up guard holds it.
+    block = result_block("RT-F", "abc1234def0", "RT-G")
+    d = FakeClaudeDriver(initial_output="echoed prompt: " + block, eof_after_empty_reads=4)
+    cfg = ClaudeConfig(poll_interval_seconds=0.001, ready_patterns=["READY"],
+                       echo_settle_seconds=0.0, min_packet_result_seconds=1000.0)
+    s = ClaudeSession(d, cfg, clock=adv_clock, sleep=lambda x: None)
+    wd = Watchdog(600, 3600, clock=adv_clock)
+    mr = s._monitor([re.escape(END_SENTINEL)], watchdog=wd, min_match_seconds=1000.0, label="packet")
+    # the guard blocked the echoed sentinel; the driver EOF'd instead of "sentinel"
+    assert mr.reason == "eof"
+
+
+def test_sentinel_matched_after_guard(adv_clock):
+    # once past the guard, a real result block IS matched
+    block = result_block("RT-F", "abc1234def0", "RT-G")
+    d = FakeClaudeDriver(initial_output="working…")
+    for _ in range(40):
+        d.queue_output("…implementing RT-F…\n")
+    d.queue_output("final:\n" + block)
+    cfg = ClaudeConfig(poll_interval_seconds=0.001, ready_patterns=["READY"],
+                       echo_settle_seconds=0.0, min_packet_result_seconds=0.1)
+    s = ClaudeSession(d, cfg, clock=adv_clock, sleep=lambda x: None)
+    wd = Watchdog(600, 3600, clock=adv_clock)
+    mr = s._monitor([re.escape(END_SENTINEL)], watchdog=wd, min_match_seconds=0.1, label="packet")
+    assert mr.reason == "sentinel"
+    assert "implementing RT-F" in mr.output  # kept reading past the warm-up
 
 
 def test_terminate_closes(adv_clock):

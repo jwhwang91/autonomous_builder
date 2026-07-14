@@ -121,6 +121,10 @@ def build_profile(target: Target, data_dir: Path, **overrides) -> ProjectProfile
         hard_timeout_minutes=overrides.get("hard_minutes", 180),
         max_retries_per_packet=overrides.get("max_retries", 2),
         ready_patterns=[r">\s*$", "READY"],
+        # the fake driver emits the result block immediately (an "instant" Claude),
+        # so disable the real-run echo-drain / warm-up guard in tests
+        echo_settle_seconds=0.0,
+        min_packet_result_seconds=0.0,
         bootstrap_steps=[BootstrapStep(send="/effort ultracode", settle_seconds=0.0)],
     )
     profile = ProjectProfile(

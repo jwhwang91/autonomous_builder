@@ -149,9 +149,19 @@ class ClaudeSession:
     def send_packet_prompt(self, prompt: str, watchdog: Watchdog) -> MonitorResult:
         self.logger("delivering packet prompt")
         self._deliver_prompt(prompt)
+        # The prompt template contains the result-block sentinels; once submitted,
+        # Claude Code echoes the pasted prompt back into the transcript. Drain and
+        # discard that echo (it goes to the transcript for the parser, but not into
+        # the monitor's match window), then guard the sentinel for a warm-up
+        # window — so we complete on CLAUDE's result block, never on the echo.
+        settle = getattr(self.config, "echo_settle_seconds", 8.0)
+        guard = getattr(self.config, "min_packet_result_seconds", 15.0)
+        self.logger("prompt submitted; draining prompt echo")
+        self._drain(settle)
         return self._monitor(
             until_patterns=[re.escape(END_SENTINEL)],
             watchdog=watchdog,
+            min_match_seconds=guard,
             label="packet",
         )
 
@@ -188,6 +198,7 @@ class ClaudeSession:
         watchdog: Optional[Watchdog] = None,
         idle_seconds: Optional[float] = None,
         hard_seconds: Optional[float] = None,
+        min_match_seconds: float = 0.0,
         label: str = "",
     ) -> MonitorResult:
         wd = watchdog or Watchdog(
@@ -202,6 +213,7 @@ class ClaudeSession:
         # keep enough overlap that a pattern can never straddle the truncation
         # boundary, even when a single read returns a full 64k buffer.
         keep = 16000
+        monitor_start = self._clock()
         last_hb = self._clock()
         while True:
             # live heartbeat so a long monitor is visibly alive, not "frozen"
@@ -229,12 +241,13 @@ class ClaudeSession:
                 for fp in failure:
                     if fp.search(search_space):
                         return MonitorResult("failure", collected, fp.pattern)
-                for up in until:
-                    if up.search(search_space):
-                        reason = "sentinel" if up.pattern == re.escape(END_SENTINEL) else "matched"
-                        # drain a little trailing output for completeness
-                        collected += self._drain(0.5)
-                        return MonitorResult(reason, collected, up.pattern)
+                if (self._clock() - monitor_start) >= min_match_seconds:
+                    for up in until:
+                        if up.search(search_space):
+                            reason = "sentinel" if up.pattern == re.escape(END_SENTINEL) else "matched"
+                            # drain a little trailing output for completeness
+                            collected += self._drain(0.5)
+                            return MonitorResult(reason, collected, up.pattern)
             if not self.driver.is_alive():
                 collected += self._drain(0.3)
                 return MonitorResult("eof", collected)
