@@ -54,13 +54,11 @@ from autonomous_builder.state.store import StateStore
 
 
 def default_bootstrap_steps(profile: ProjectProfile) -> list[BootstrapStep]:
+    # Effort and model are set via CLI flags (--effort/--model) at spawn, NOT via
+    # the /effort or /model slash menus (those are interactive pickers that tangle
+    # with prompt delivery). So the default bootstrap is empty unless the profile
+    # explicitly configures steps.
     steps = list(profile.claude.bootstrap_steps)
-    if not steps:
-        steps = [BootstrapStep(
-            send=f"/effort {profile.claude.effort}",
-            description=f"set effort to {profile.claude.effort}",
-            settle_seconds=2.0,
-        )]
     if profile.graphify.run_at_bootstrap:
         steps.append(BootstrapStep(
             send=profile.graphify.command,
@@ -76,6 +74,8 @@ def default_session_factory(profile: ProjectProfile) -> Callable[[str], ClaudeSe
         args: list[str] = []
         if profile.claude.model:
             args += ["--model", profile.claude.model]
+        if profile.claude.effort:
+            args += ["--effort", profile.claude.effort]  # reliable; not the /effort menu
         if profile.claude.dangerously_skip_permissions:
             args.append("--dangerously-skip-permissions")
         args += list(profile.claude.extra_args)

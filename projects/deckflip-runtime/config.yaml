@@ -24,7 +24,10 @@ assets:
 claude:
   executable: /opt/homebrew/bin/claude
   model: opus
-  effort: ultracode
+  # 'ultracode' is NOT a valid --effort flag value (valid: low|medium|high|xhigh|
+  # max) — it's a UI-only mode = xhigh + dynamic multi-agent fan-out. xhigh gives
+  # the same reasoning depth WITHOUT the fan-out that multiplies token usage.
+  effort: xhigh
   fresh_session_per_packet: true
   max_retries_per_packet: 2
   idle_timeout_minutes: 20      # react faster to a dead connection (was 45)
@@ -35,15 +38,11 @@ claude:
   # repo + plan, the builder verifies repository truth after every packet, stops
   # on any problem, and never pushes. Set back to false to require live approval.
   dangerously_skip_permissions: true
-  # Model is passed as a CLI flag (--model opus) for reliability; effort is set
-  # via a slash command. Add a graphify bootstrap step below if you want the
-  # graph refreshed for understanding before edits (see graphify.run_at_bootstrap).
-  bootstrap_steps:
-    - send: "/effort ultracode"
-      description: set effort to ultracode
-      expect: "ultracode"      # confirm it engaged (logged in the session log)
-      required: false          # log-only for now; bump to true once verified
-      settle_seconds: 2.0
+  # Model AND effort are set via CLI flags (--model, --effort) at spawn — reliable.
+  # No /effort or /model slash commands: those are interactive MENUS that tangle
+  # with prompt delivery (they broke the first run). Leave bootstrap empty unless
+  # you need something like a graphify-at-bootstrap step.
+  bootstrap_steps: []
 
 graphify:
   update_after_commit: true

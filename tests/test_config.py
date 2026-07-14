@@ -135,7 +135,7 @@ def test_deckflip_profile_loads():
     profile = load_profile(cfg, slug="deckflip-runtime")
     assert profile.project.name == "DeckFlip Runtime"
     assert profile.claude.model == "opus"
-    assert profile.claude.effort == "ultracode"
+    assert profile.claude.effort == "xhigh"  # ultracode is not a valid --effort flag value
     assert "npm run build:editor" in profile.execution.test_commands
     assert profile.finalization.create_test_deck is False
     assert profile.execution.push is False
